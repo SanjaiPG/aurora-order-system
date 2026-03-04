@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,6 +13,12 @@ import (
 )
 
 var db *sql.DB
+
+type OrderRequest struct {
+	UserID    int `json:"user_id"`
+	ProductID int `json:"product_id"`
+	Price     int `json:"price"`
+}
 
 func main() {
 
@@ -56,9 +63,17 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 
 func placeOrder(w http.ResponseWriter, r *http.Request) {
 
-	userID := 1
-	productID := 1
-	price := 1000
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req OrderRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		http.Error(w, "Invalid JSON request", 400)
+		return
+	}
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -67,7 +82,11 @@ func placeOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var stock int
-	err = tx.QueryRow("SELECT stock FROM inventory WHERE product_id=$1 FOR UPDATE", productID).Scan(&stock)
+	err = tx.QueryRow(
+		"SELECT stock FROM inventory WHERE product_id=$1 FOR UPDATE",
+		req.ProductID,
+	).Scan(&stock)
+
 	if err != nil {
 		tx.Rollback()
 		http.Error(w, "Product not found", 400)
@@ -81,34 +100,49 @@ func placeOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var balance int
-	err = tx.QueryRow("SELECT balance FROM users WHERE user_id=$1 FOR UPDATE", userID).Scan(&balance)
+	err = tx.QueryRow(
+		"SELECT balance FROM users WHERE user_id=$1 FOR UPDATE",
+		req.UserID,
+	).Scan(&balance)
+
 	if err != nil {
 		tx.Rollback()
 		http.Error(w, "User not found", 400)
 		return
 	}
 
-	if balance < price {
+	if balance < req.Price {
 		tx.Rollback()
 		http.Error(w, "Insufficient balance", 400)
 		return
 	}
 
-	_, err = tx.Exec("UPDATE inventory SET stock=stock-1 WHERE product_id=$1", productID)
+	_, err = tx.Exec(
+		"UPDATE inventory SET stock=stock-1 WHERE product_id=$1",
+		req.ProductID,
+	)
 	if err != nil {
 		tx.Rollback()
 		http.Error(w, "Inventory update failed", 500)
 		return
 	}
 
-	_, err = tx.Exec("UPDATE users SET balance=balance-$1 WHERE user_id=$2", price, userID)
+	_, err = tx.Exec(
+		"UPDATE users SET balance=balance-$1 WHERE user_id=$2",
+		req.Price,
+		req.UserID,
+	)
 	if err != nil {
 		tx.Rollback()
 		http.Error(w, "Payment failed", 500)
 		return
 	}
 
-	_, err = tx.Exec("INSERT INTO orders (user_id, product_id, status) VALUES ($1,$2,'CONFIRMED')", userID, productID)
+	_, err = tx.Exec(
+		"INSERT INTO orders (user_id, product_id, status) VALUES ($1,$2,'CONFIRMED')",
+		req.UserID,
+		req.ProductID,
+	)
 	if err != nil {
 		tx.Rollback()
 		http.Error(w, "Order insert failed", 500)
