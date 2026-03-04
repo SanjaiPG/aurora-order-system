@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -20,11 +21,15 @@ type OrderRequest struct {
 	Price     int `json:"price"`
 }
 
+type StockResponse struct {
+	Stock int `json:"stock"`
+}
+
 func main() {
 
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		log.Fatal("Error loading .env")
 	}
 
 	host := os.Getenv("DB_HOST")
@@ -45,85 +50,74 @@ func main() {
 
 	err = db.Ping()
 	if err != nil {
-		log.Fatal("Database connection failed:", err)
+		log.Fatal(err)
 	}
 
-	fmt.Println("Connected to PostgreSQL successfully")
+	fmt.Println("Order Service connected to DB")
 
-	http.HandleFunc("/health", healthCheck)
 	http.HandleFunc("/place-order", placeOrder)
 
 	fmt.Println("Order Service running on port 8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
-}
 
-func healthCheck(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Order Service is running"))
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func placeOrder(w http.ResponseWriter, r *http.Request) {
 
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var req OrderRequest
+
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		http.Error(w, "Invalid JSON request", 400)
+		http.Error(w, "Invalid JSON", 400)
 		return
 	}
 
-	tx, err := db.Begin()
-	if err != nil {
-		http.Error(w, "Failed to start transaction", 500)
-		return
-	}
+	// Step 1: Call inventory service
+	inventoryURL := "http://localhost:8081/check-stock"
 
-	var stock int
-	err = tx.QueryRow(
-		"SELECT stock FROM inventory WHERE product_id=$1 FOR UPDATE",
-		req.ProductID,
-	).Scan(&stock)
+	body, _ := json.Marshal(map[string]int{
+		"product_id": req.ProductID,
+	})
+
+	resp, err := http.Post(inventoryURL, "application/json", bytes.NewBuffer(body))
 
 	if err != nil {
-		tx.Rollback()
-		http.Error(w, "Product not found", 400)
+		http.Error(w, "Inventory service error", 500)
 		return
 	}
 
-	if stock <= 0 {
-		tx.Rollback()
+	var stockResp StockResponse
+	json.NewDecoder(resp.Body).Decode(&stockResp)
+
+	if stockResp.Stock <= 0 {
 		http.Error(w, "Out of stock", 400)
 		return
 	}
 
+	// Step 2: Check user balance
+
 	var balance int
-	err = tx.QueryRow(
-		"SELECT balance FROM users WHERE user_id=$1 FOR UPDATE",
+
+	err = db.QueryRow(
+		"SELECT balance FROM users WHERE user_id=$1",
 		req.UserID,
 	).Scan(&balance)
 
 	if err != nil {
-		tx.Rollback()
 		http.Error(w, "User not found", 400)
 		return
 	}
 
 	if balance < req.Price {
-		tx.Rollback()
 		http.Error(w, "Insufficient balance", 400)
 		return
 	}
 
-	_, err = tx.Exec(
-		"UPDATE inventory SET stock=stock-1 WHERE product_id=$1",
-		req.ProductID,
-	)
+	// Step 3: Start transaction
+
+	tx, err := db.Begin()
 	if err != nil {
-		tx.Rollback()
-		http.Error(w, "Inventory update failed", 500)
+		http.Error(w, "Transaction failed", 500)
 		return
 	}
 
@@ -132,6 +126,7 @@ func placeOrder(w http.ResponseWriter, r *http.Request) {
 		req.Price,
 		req.UserID,
 	)
+
 	if err != nil {
 		tx.Rollback()
 		http.Error(w, "Payment failed", 500)
@@ -139,13 +134,14 @@ func placeOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = tx.Exec(
-		"INSERT INTO orders (user_id, product_id, status) VALUES ($1,$2,'CONFIRMED')",
+		"INSERT INTO orders (user_id,product_id,status) VALUES ($1,$2,'CONFIRMED')",
 		req.UserID,
 		req.ProductID,
 	)
+
 	if err != nil {
 		tx.Rollback()
-		http.Error(w, "Order insert failed", 500)
+		http.Error(w, "Order failed", 500)
 		return
 	}
 
@@ -154,6 +150,10 @@ func placeOrder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Commit failed", 500)
 		return
 	}
+
+	updateURL := "http://localhost:8081/update-stock"
+
+	http.Post(updateURL, "application/json", bytes.NewBuffer(body))
 
 	w.Write([]byte("Order placed successfully"))
 }
