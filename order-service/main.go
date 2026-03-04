@@ -55,11 +55,26 @@ func main() {
 
 	fmt.Println("Order Service connected to DB")
 
-	http.HandleFunc("/place-order", placeOrder)
+	http.HandleFunc("/place-order", enableCORS(placeOrder))
 
 	fmt.Println("Order Service running on port 8080")
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func enableCORS(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+
+		if r.Method == "OPTIONS" {
+			return
+		}
+
+		next(w, r)
+	}
 }
 
 func placeOrder(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +95,6 @@ func placeOrder(w http.ResponseWriter, r *http.Request) {
 	})
 
 	resp, err := http.Post(inventoryURL, "application/json", bytes.NewBuffer(body))
-
 	if err != nil {
 		http.Error(w, "Inventory service error", 500)
 		return
@@ -95,7 +109,6 @@ func placeOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 2: Check user balance
-
 	var balance int
 
 	err = db.QueryRow(
@@ -114,7 +127,6 @@ func placeOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 3: Start transaction
-
 	tx, err := db.Begin()
 	if err != nil {
 		http.Error(w, "Transaction failed", 500)
@@ -151,8 +163,8 @@ func placeOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 4: Update stock
 	updateURL := "http://localhost:8081/update-stock"
-
 	http.Post(updateURL, "application/json", bytes.NewBuffer(body))
 
 	w.Write([]byte("Order placed successfully"))
