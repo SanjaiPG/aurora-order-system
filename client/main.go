@@ -24,7 +24,7 @@ func main() {
 	data, _ := json.Marshal(req)
 
 	resp, err := http.Post(
-		"http://localhost:8080/place-order",
+		"http://ORDER_SERVICE_IP:8080/place-order",
 		"application/json",
 		bytes.NewBuffer(data),
 	)
@@ -33,6 +33,8 @@ func main() {
 		fmt.Println("Request failed:", err)
 		return
 	}
+
+	defer resp.Body.Close()
 
 	fmt.Println("Order Response:", resp.Status)
 }

@@ -13,7 +13,8 @@ import (
 	_ "github.com/lib/pq"
 )
 
-var db *sql.DB
+var writerDB *sql.DB
+var readerDB *sql.DB
 
 type OrderRequest struct {
 	UserID    int `json:"user_id"`
@@ -33,29 +34,34 @@ func main() {
 	}
 
 	host := os.Getenv("DB_HOST")
-	port := os.Getenv("DB_PORT")
 	user := os.Getenv("DB_USER")
 	password := os.Getenv("DB_PASSWORD")
 	dbname := os.Getenv("DB_NAME")
+	inventoryService := os.Getenv("INVENTORY_SERVICE_URL")
 
-	connStr := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname,
+	// Primary DB (writer)
+	writerConn := fmt.Sprintf(
+		"host=%s port=5432 user=%s password=%s dbname=%s sslmode=disable",
+		host, user, password, dbname,
 	)
 
-	db, err = sql.Open("postgres", connStr)
+	writerDB, err = sql.Open("postgres", writerConn)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	err = db.Ping()
+	// Replica DB (reader)
+	readerConn := fmt.Sprintf(
+		"host=%s port=5433 user=%s password=%s dbname=%s sslmode=disable",
+		host, user, password, dbname,
+	)
+
+	readerDB, err = sql.Open("postgres", readerConn)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println("Order Service connected to DB")
-
-	http.HandleFunc("/place-order", enableCORS(placeOrder))
+	http.HandleFunc("/place-order", enableCORS(placeOrder(inventoryService)))
 
 	fmt.Println("Order Service running on port 8080")
 
@@ -67,7 +73,7 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 
 		if r.Method == "OPTIONS" {
 			return
@@ -77,95 +83,101 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func placeOrder(w http.ResponseWriter, r *http.Request) {
+func placeOrder(inventoryService string) http.HandlerFunc {
 
-	var req OrderRequest
+	return func(w http.ResponseWriter, r *http.Request) {
 
-	err := json.NewDecoder(r.Body).Decode(&req)
-	if err != nil {
-		http.Error(w, "Invalid JSON", 400)
-		return
+		var req OrderRequest
+
+		err := json.NewDecoder(r.Body).Decode(&req)
+		if err != nil {
+			http.Error(w, "Invalid JSON", 400)
+			return
+		}
+
+		// Check stock
+		body, _ := json.Marshal(map[string]int{
+			"product_id": req.ProductID,
+		})
+
+		resp, err := http.Post(
+			inventoryService+"/check-stock",
+			"application/json",
+			bytes.NewBuffer(body),
+		)
+
+		if err != nil {
+			http.Error(w, "Inventory service error", 500)
+			return
+		}
+		defer resp.Body.Close()
+
+		var stockResp StockResponse
+		json.NewDecoder(resp.Body).Decode(&stockResp)
+
+		if stockResp.Stock <= 0 {
+			http.Error(w, "Out of stock", 400)
+			return
+		}
+
+		// Read balance from replica
+		var balance int
+
+		err = readerDB.QueryRow(
+			"SELECT balance FROM users WHERE user_id=$1",
+			req.UserID,
+		).Scan(&balance)
+
+		if err != nil {
+			http.Error(w, "User not found", 400)
+			return
+		}
+
+		if balance < req.Price {
+			http.Error(w, "Insufficient balance", 400)
+			return
+		}
+
+		// Write transaction to primary
+		tx, err := writerDB.Begin()
+		if err != nil {
+			http.Error(w, "Transaction failed", 500)
+			return
+		}
+
+		_, err = tx.Exec(
+			"UPDATE users SET balance = balance - $1 WHERE user_id = $2",
+			req.Price,
+			req.UserID,
+		)
+
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, "Payment failed", 500)
+			return
+		}
+
+		_, err = tx.Exec(
+			"INSERT INTO orders (user_id,product_id,status) VALUES ($1,$2,'CONFIRMED')",
+			req.UserID,
+			req.ProductID,
+		)
+
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, "Order failed", 500)
+			return
+		}
+
+		tx.Commit()
+
+		// Update stock
+		http.Post(
+			inventoryService+"/update-stock",
+			"application/json",
+			bytes.NewBuffer(body),
+		)
+
+		w.Write([]byte("Order placed successfully"))
 	}
-
-	// Step 1: Call inventory service
-	inventoryURL := "http://localhost:8081/check-stock"
-
-	body, _ := json.Marshal(map[string]int{
-		"product_id": req.ProductID,
-	})
-
-	resp, err := http.Post(inventoryURL, "application/json", bytes.NewBuffer(body))
-	if err != nil {
-		http.Error(w, "Inventory service error", 500)
-		return
-	}
-
-	var stockResp StockResponse
-	json.NewDecoder(resp.Body).Decode(&stockResp)
-
-	if stockResp.Stock <= 0 {
-		http.Error(w, "Out of stock", 400)
-		return
-	}
-
-	// Step 2: Check user balance
-	var balance int
-
-	err = db.QueryRow(
-		"SELECT balance FROM users WHERE user_id=$1",
-		req.UserID,
-	).Scan(&balance)
-
-	if err != nil {
-		http.Error(w, "User not found", 400)
-		return
-	}
-
-	if balance < req.Price {
-		http.Error(w, "Insufficient balance", 400)
-		return
-	}
-
-	// Step 3: Start transaction
-	tx, err := db.Begin()
-	if err != nil {
-		http.Error(w, "Transaction failed", 500)
-		return
-	}
-
-	_, err = tx.Exec(
-		"UPDATE users SET balance=balance-$1 WHERE user_id=$2",
-		req.Price,
-		req.UserID,
-	)
-
-	if err != nil {
-		tx.Rollback()
-		http.Error(w, "Payment failed", 500)
-		return
-	}
-
-	_, err = tx.Exec(
-		"INSERT INTO orders (user_id,product_id,status) VALUES ($1,$2,'CONFIRMED')",
-		req.UserID,
-		req.ProductID,
-	)
-
-	if err != nil {
-		tx.Rollback()
-		http.Error(w, "Order failed", 500)
-		return
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		http.Error(w, "Commit failed", 500)
-		return
-	}
-
-	// Step 4: Update stock
-	updateURL := "http://localhost:8081/update-stock"
-	http.Post(updateURL, "application/json", bytes.NewBuffer(body))
-
-	w.Write([]byte("Order placed successfully"))
 }

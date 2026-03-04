@@ -30,14 +30,13 @@ func main() {
 	}
 
 	host := os.Getenv("DB_HOST")
-	port := os.Getenv("DB_PORT")
 	user := os.Getenv("DB_USER")
 	password := os.Getenv("DB_PASSWORD")
 	dbname := os.Getenv("DB_NAME")
 
 	connStr := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname,
+		"host=%s port=5432 user=%s password=%s dbname=%s sslmode=disable",
+		host, user, password, dbname,
 	)
 
 	db, err = sql.Open("postgres", connStr)
@@ -82,9 +81,7 @@ func checkStock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := StockResponse{Stock: stock}
-
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(StockResponse{Stock: stock})
 }
 
 func updateStock(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +95,7 @@ func updateStock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = db.Exec(
-		"UPDATE inventory SET stock=stock-1 WHERE product_id=$1",
+		"UPDATE inventory SET stock = stock - 1 WHERE product_id=$1",
 		req.ProductID,
 	)
 
