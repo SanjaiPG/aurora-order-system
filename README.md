@@ -80,94 +80,126 @@ Even when services run on the same machine, they communicate via **HTTP REST API
 ---
 
 How to Run the Project
+
 1. Install Requirements
 
-Install the following:
+   Install the following:
 
-Go (1.20 or later)
+   - Go (1.20 or later)
+   - PostgreSQL 14+
+   - Git
 
-PostgreSQL 14+
+   Verify installation:
 
-Git
+   ```bash
+   go version
+   psql --version
+   ```
 
-Verify installation:
-
-go version
-psql --version
 2. Setup PostgreSQL Primary
 
-Start PostgreSQL normally.
+   Start PostgreSQL normally.
 
-Verify:
+   Verify:
 
-psql -p 5432 -U postgres
+   ```bash
+   psql -p 5432 -U postgres
+   ```
 
-Create database:
+   Create database:
 
-CREATE DATABASE aurora_orders;
+   ```sql
+   CREATE DATABASE aurora_orders;
+   ```
 
-The database schema is provided in schema.sql. Create tables using schema.sql.
+   The database schema is provided in schema.sql. Create tables using schema.sql.
 
 3. Setup PostgreSQL Replica
 
-Create replica using:
+   Create replica using:
 
-pg_basebackup -h localhost -U replicator -D C:\aurora-replica -Fp -Xs -P -R
+   ```bash
+   pg_basebackup -h localhost -U replicator -D C:\aurora-replica -Fp -Xs -P -R
+   ```
 
-Start replica server:
+   Start replica server:
 
-& "C:\Program Files\PostgreSQL\18\bin\pg_ctl.exe" -D C:\aurora-replica start -l logfile
+   ```bash
+   & "C:\Program Files\PostgreSQL\18\bin\pg_ctl.exe" -D C:\aurora-replica start -l logfile
+   ```
 
-Edit replica configuration:
+   Edit replica configuration:
 
-C:\aurora-replica\postgresql.conf
+   `C:\aurora-replica\postgresql.conf`
 
-Set:
+   Set:
 
-port = 5433
+   ```
+   port = 5433
+   ```
 
-Verify replica:
+   Verify replica:
 
-psql -p 5433 -U postgres
+   ```bash
+   psql -p 5433 -U postgres
+   ```
 
-Check:
+   Check:
 
-SELECT pg_is_in_recovery();
+   ```sql
+   SELECT pg_is_in_recovery();
+   ```
 
-If result is:
+   If result is:
 
-t
+   ```
+   t
+   ```
 
-Replication is working.
+   Replication is working.
 
 4. Configure Environment Variables
 
-Create .env file for services.
+   Create .env file for services.
 
 5. Run Inventory Service
-cd inventory-service
-go run main.go
 
-Output:
+   ```bash
+   cd inventory-service
+   go run main.go
+   ```
 
-Inventory Service running on port 8081
+   Output:
+
+   ```
+   Inventory Service running on port 8081
+   ```
+
 6. Run Order Service
-cd order-service
-go run main.go
 
-Output:
+   ```bash
+   cd order-service
+   go run main.go
+   ```
 
-Order Service running on port 8080
+   Output:
+
+   ```
+   Order Service running on port 8080
+   ```
+
 7. Run Client
 
-Edit the client to point to the Order Service laptop:
+   Edit the client to point to the Order Service laptop:
 
-http://<ORDER_SERVICE_IP>:8080/place-order
+   `http://<ORDER_SERVICE_IP>:8080/place-order`
 
-Run:
+   Run:
 
-the index.html file and place the orders
+   the index.html file and place the orders
 
-Expected output:
+   Expected output:
 
-Order Response: 200 OK
+   ```
+   Order Response: 200 OK
+   ```
