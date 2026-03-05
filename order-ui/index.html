@@ -4,173 +4,160 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Order Portal | Distributed System</title>
+    <title>Modern Order Portal</title>
     <style>
         :root {
-            --primary-color: #4f46e5;
+            --primary: #4f46e5;
             --primary-hover: #4338ca;
-            --bg-gradient: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            --bg: #f8fafc;
             --card-bg: #ffffff;
-            --text-main: #1f2937;
-            --text-muted: #6b7280;
-            --border-color: #e5e7eb;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --error: #ef4444;
+            --success: #22c55e;
         }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: var(--bg-gradient);
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: center;
             height: 100vh;
             margin: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--text-main);
         }
 
-        .order-card {
+        .card {
             background: var(--card-bg);
-            padding: 2.5rem;
-            border-radius: 16px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
             width: 100%;
-            max-width: 400px;
-            transition: transform 0.2s ease;
+            max-width: 360px;
         }
 
-        .header {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-
-        .header h2 {
-            margin: 0;
+        h3 {
+            margin-top: 0;
+            margin-bottom: 0.5rem;
             font-size: 1.5rem;
             font-weight: 700;
-            color: var(--text-main);
         }
 
-        .header p {
-            margin-top: 0.5rem;
-            font-size: 0.875rem;
+        p.subtitle {
             color: var(--text-muted);
+            font-size: 0.875rem;
+            margin-bottom: 1.5rem;
         }
 
         .form-group {
-            margin-bottom: 1.25rem;
+            margin-bottom: 1rem;
         }
 
         label {
             display: block;
-            font-size: 0.875rem;
+            font-size: 0.75rem;
             font-weight: 600;
-            margin-bottom: 0.5rem;
-            color: var(--text-main);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.25rem;
+            color: var(--text-muted);
         }
 
         input {
             width: 100%;
-            padding: 0.75rem;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            box-sizing: border-box;
+            padding: 10px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
             font-size: 1rem;
-            transition: all 0.2s;
-            outline: none;
+            box-sizing: border-box;
+            transition: border-color 0.2s, box-shadow 0.2s;
         }
 
         input:focus {
-            border-color: var(--primary-color);
+            outline: none;
+            border-color: var(--primary);
             box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
         }
 
         button {
             width: 100%;
-            background-color: var(--primary-color);
+            padding: 12px;
+            background: var(--primary);
             color: white;
-            padding: 0.75rem;
             border: none;
-            border-radius: 8px;
-            font-size: 1rem;
+            border-radius: 6px;
             font-weight: 600;
+            font-size: 1rem;
             cursor: pointer;
-            transition: background-color 0.2s;
-            margin-top: 1rem;
+            transition: background 0.2s, transform 0.1s;
+            margin-top: 0.5rem;
         }
 
         button:hover {
-            background-color: var(--primary-hover);
+            background: var(--primary-hover);
+        }
+
+        button:active {
+            transform: scale(0.98);
         }
 
         button:disabled {
-            background-color: #a5b4fc;
+            background: #94a3b8;
             cursor: not-allowed;
         }
 
         #result {
-            margin-top: 1.5rem;
-            padding: 1rem;
-            border-radius: 8px;
+            margin-top: 1.25rem;
+            padding: 10px;
+            border-radius: 6px;
             font-size: 0.875rem;
             text-align: center;
+            min-height: 20px;
             display: none;
-            /* Hidden by default */
-        }
-
-        .status-success {
-            display: block !important;
-            background-color: #f0fdf4;
-            color: #166534;
-            border: 1px solid #bbf7d0;
         }
 
         .status-error {
+            background: #fef2f2;
+            color: var(--error);
+            border: 1px solid #fee2e2;
             display: block !important;
-            background-color: #fef2f2;
-            color: #991b1b;
-            border: 1px solid #fecaca;
         }
 
-        /* Loading Spinner Animation */
-        .spinner {
-            display: inline-block;
-            width: 12px;
-            height: 12px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 0.8s linear infinite;
-            margin-right: 8px;
+        .status-success {
+            background: #f0fdf4;
+            color: var(--success);
+            border: 1px solid #dcfce7;
+            display: block !important;
         }
 
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
+        .status-loading {
+            background: #f1f5f9;
+            color: var(--text-muted);
+            display: block !important;
         }
     </style>
 </head>
 
 <body>
 
-    <div class="order-card">
-        <div class="header">
-            <h2>Place New Order</h2>
-            <p>Enter details to process through the system</p>
+    <div class="card">
+        <h3>Place Order</h3>
+        <p class="subtitle">Enter the details below to process the request.</p>
+
+        <div class="form-group">
+            <label for="user">User ID</label>
+            <input type="number" id="user" placeholder="e.g. 101">
         </div>
 
         <div class="form-group">
-            <label for="user_id">User ID</label>
-            <input type="number" id="user_id" placeholder="e.g. 101">
-        </div>
-
-        <div class="form-group">
-            <label for="product_id">Product ID</label>
-            <input type="number" id="product_id" placeholder="e.g. 5002">
+            <label for="product">Product ID</label>
+            <input type="number" id="product" placeholder="e.g. 5052">
         </div>
 
         <div class="form-group">
             <label for="price">Price ($)</label>
-            <input type="number" id="price" placeholder="0.00">
+            <input type="number" id="price" placeholder="e.g. 299">
         </div>
 
         <button id="orderBtn" onclick="placeOrder()">Place Order</button>
@@ -179,32 +166,36 @@
     </div>
 
     <script>
+        const ORDER_SERVICE = "http://localhost:8080/place-order"; // Localhost for development
+        // const ORDER_SERVICE = "http://your-order-serviceip:8080/place-order"; // Update with actual IP address of the order service
+
         async function placeOrder() {
             const btn = document.getElementById("orderBtn");
             const resultDiv = document.getElementById("result");
-            const userId = document.getElementById("user_id").value;
-            const productId = document.getElementById("product_id").value;
+
+            // Get values
+            const user = document.getElementById("user").value;
+            const product = document.getElementById("product").value;
             const price = document.getElementById("price").value;
 
             // Simple validation
-            if (!userId || !productId || !price) {
+            if (!user || !product || !price) {
                 showResult("Please fill in all fields", "error");
                 return;
             }
 
             const data = {
-                user_id: parseInt(userId),
-                product_id: parseInt(productId),
+                user_id: parseInt(user),
+                product_id: parseInt(product),
                 price: parseInt(price)
             };
 
-            // UI Loading State
+            // UI State: Loading
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner"></span> Processing...';
-            resultDiv.style.display = "none";
+            showResult("Processing order...", "loading");
 
             try {
-                const res = await fetch("http://localhost:8080/place-order", {
+                const res = await fetch(ORDER_SERVICE, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(data)
@@ -213,26 +204,25 @@
                 const text = await res.text();
 
                 if (res.ok) {
-                    showResult("✔ " + text, "success");
+                    showResult("Success: " + text, "success");
                 } else {
-                    showResult("✖ Error: " + text, "error");
+                    showResult("Error: " + text, "error");
                 }
 
             } catch (err) {
-                showResult("✖ Connection failed. Is the server running?", "error");
+                showResult("Connection error. Is the server running?", "error");
             } finally {
                 btn.disabled = false;
-                btn.innerText = "Place Order";
             }
         }
 
         function showResult(message, type) {
             const resultDiv = document.getElementById("result");
             resultDiv.innerText = message;
-            resultDiv.className = type === "success" ? "status-success" : "status-error";
+            resultDiv.className = "";
+            resultDiv.classList.add(`status-${type}`);
         }
     </script>
-
 </body>
 
 </html>

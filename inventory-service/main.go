@@ -22,6 +22,8 @@ type StockResponse struct {
 	Stock int `json:"stock"`
 }
 
+var pendingProduct int
+
 func main() {
 
 	err := godotenv.Load()
@@ -51,58 +53,55 @@ func main() {
 
 	fmt.Println("Inventory Service connected to DB")
 
-	http.HandleFunc("/check-stock", checkStock)
-	http.HandleFunc("/update-stock", updateStock)
+	http.HandleFunc("/prepare-stock", prepareStock)
+	http.HandleFunc("/commit-stock", commitStock)
+	http.HandleFunc("/abort-stock", abortStock)
 
 	fmt.Println("Inventory Service running on port 8081")
 
 	log.Fatal(http.ListenAndServe(":8081", nil))
 }
 
-func checkStock(w http.ResponseWriter, r *http.Request) {
+func prepareStock(w http.ResponseWriter, r *http.Request) {
 
 	var req InventoryRequest
-
-	err := json.NewDecoder(r.Body).Decode(&req)
-	if err != nil {
-		http.Error(w, "Invalid request", 400)
-		return
-	}
+	json.NewDecoder(r.Body).Decode(&req)
 
 	var stock int
 
-	err = db.QueryRow(
+	err := db.QueryRow(
 		"SELECT stock FROM inventory WHERE product_id=$1",
 		req.ProductID,
 	).Scan(&stock)
 
-	if err != nil {
-		http.Error(w, "Product not found", 404)
+	if err != nil || stock <= 0 {
+		http.Error(w, "ABORT", 400)
 		return
 	}
 
-	json.NewEncoder(w).Encode(StockResponse{Stock: stock})
+	pendingProduct = req.ProductID
+
+	w.Write([]byte("READY"))
 }
 
-func updateStock(w http.ResponseWriter, r *http.Request) {
+func commitStock(w http.ResponseWriter, r *http.Request) {
 
-	var req InventoryRequest
-
-	err := json.NewDecoder(r.Body).Decode(&req)
-	if err != nil {
-		http.Error(w, "Invalid request", 400)
-		return
-	}
-
-	_, err = db.Exec(
+	_, err := db.Exec(
 		"UPDATE inventory SET stock = stock - 1 WHERE product_id=$1",
-		req.ProductID,
+		pendingProduct,
 	)
 
 	if err != nil {
-		http.Error(w, "Stock update failed", 500)
+		http.Error(w, "Commit failed", 500)
 		return
 	}
 
-	w.Write([]byte("Stock updated"))
+	w.Write([]byte("COMMIT OK"))
+}
+
+func abortStock(w http.ResponseWriter, r *http.Request) {
+
+	pendingProduct = 0
+
+	w.Write([]byte("ABORTED"))
 }

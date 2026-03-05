@@ -22,10 +22,6 @@ type OrderRequest struct {
 	Price     int `json:"price"`
 }
 
-type StockResponse struct {
-	Stock int `json:"stock"`
-}
-
 func main() {
 
 	err := godotenv.Load()
@@ -39,7 +35,7 @@ func main() {
 	dbname := os.Getenv("DB_NAME")
 	inventoryService := os.Getenv("INVENTORY_SERVICE_URL")
 
-	// Primary DB (writer)
+	// Primary DB (Writer)
 	writerConn := fmt.Sprintf(
 		"host=%s port=5432 user=%s password=%s dbname=%s sslmode=disable",
 		host, user, password, dbname,
@@ -50,7 +46,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Replica DB (reader)
+	// Replica DB (Reader)
 	readerConn := fmt.Sprintf(
 		"host=%s port=5433 user=%s password=%s dbname=%s sslmode=disable",
 		host, user, password, dbname,
@@ -61,14 +57,15 @@ func main() {
 		log.Fatal(err)
 	}
 
-	http.HandleFunc("/place-order", enableCORS(placeOrder(inventoryService)))
-
 	fmt.Println("Order Service running on port 8080")
+
+	http.HandleFunc("/place-order", enableCORS(placeOrder(inventoryService)))
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func enableCORS(next http.HandlerFunc) http.HandlerFunc {
+
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -95,32 +92,32 @@ func placeOrder(inventoryService string) http.HandlerFunc {
 			return
 		}
 
-		// Check stock
 		body, _ := json.Marshal(map[string]int{
 			"product_id": req.ProductID,
 		})
 
+		// PHASE 1 : PREPARE
+
 		resp, err := http.Post(
-			inventoryService+"/check-stock",
+			inventoryService+"/prepare-stock",
 			"application/json",
 			bytes.NewBuffer(body),
 		)
 
-		if err != nil {
-			http.Error(w, "Inventory service error", 500)
-			return
-		}
-		defer resp.Body.Close()
+		if err != nil || resp.StatusCode != 200 {
 
-		var stockResp StockResponse
-		json.NewDecoder(resp.Body).Decode(&stockResp)
+			http.Post(
+				inventoryService+"/abort-stock",
+				"application/json",
+				nil,
+			)
 
-		if stockResp.Stock <= 0 {
 			http.Error(w, "Out of stock", 400)
 			return
 		}
 
-		// Read balance from replica
+		// CHECK USER BALANCE (Replica DB)
+
 		var balance int
 
 		err = readerDB.QueryRow(
@@ -129,18 +126,40 @@ func placeOrder(inventoryService string) http.HandlerFunc {
 		).Scan(&balance)
 
 		if err != nil {
+
+			http.Post(
+				inventoryService+"/abort-stock",
+				"application/json",
+				nil,
+			)
+
 			http.Error(w, "User not found", 400)
 			return
 		}
 
 		if balance < req.Price {
+
+			http.Post(
+				inventoryService+"/abort-stock",
+				"application/json",
+				nil,
+			)
+
 			http.Error(w, "Insufficient balance", 400)
 			return
 		}
 
-		// Write transaction to primary
+		// WRITE TRANSACTION (Primary DB)
+
 		tx, err := writerDB.Begin()
 		if err != nil {
+
+			http.Post(
+				inventoryService+"/abort-stock",
+				"application/json",
+				nil,
+			)
+
 			http.Error(w, "Transaction failed", 500)
 			return
 		}
@@ -152,28 +171,45 @@ func placeOrder(inventoryService string) http.HandlerFunc {
 		)
 
 		if err != nil {
+
 			tx.Rollback()
+
+			http.Post(
+				inventoryService+"/abort-stock",
+				"application/json",
+				nil,
+			)
+
 			http.Error(w, "Payment failed", 500)
 			return
 		}
 
 		_, err = tx.Exec(
-			"INSERT INTO orders (user_id,product_id,status) VALUES ($1,$2,'CONFIRMED')",
+			"INSERT INTO orders (user_id, product_id, status) VALUES ($1,$2,'CONFIRMED')",
 			req.UserID,
 			req.ProductID,
 		)
 
 		if err != nil {
+
 			tx.Rollback()
+
+			http.Post(
+				inventoryService+"/abort-stock",
+				"application/json",
+				nil,
+			)
+
 			http.Error(w, "Order failed", 500)
 			return
 		}
 
 		tx.Commit()
 
-		// Update stock
+		// PHASE 2 : COMMIT
+
 		http.Post(
-			inventoryService+"/update-stock",
+			inventoryService+"/commit-stock",
 			"application/json",
 			bytes.NewBuffer(body),
 		)
